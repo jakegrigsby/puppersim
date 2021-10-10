@@ -60,6 +60,7 @@ def main():
     observations = []
     actions = []
     motor_angle_histories = []
+    ep_lengths = []
     for i in range(args.num_rollouts):
         motor_angles = []
         obs = env.reset()
@@ -85,6 +86,7 @@ def main():
             motor_angles.append(obs[:-2])
             totalr += r
             steps += 1
+        ep_lengths.append(steps)
         returns.append(totalr)
         motor_angle_histories.append(motor_angles)
 
@@ -95,6 +97,7 @@ def main():
             pickle.dump({"returns": returns, "motor_angles": motor_angle_histories}, f)
 
     print("returns", returns)
+    print("ep_lengths", ep_lengths)
     print("mean return", np.mean(returns))
     print("std of return", np.std(returns))
 
