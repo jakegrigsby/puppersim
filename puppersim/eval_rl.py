@@ -44,12 +44,7 @@ def main():
         policy.load_state_dict(torch.load(args.expert_policy_file))
         policy.to(dc.device)
     elif args.alg == "sb3":
-        policy = PPO(
-            "MlpPolicy",
-            env,
-            batch_size=32,
-            verbose=1,
-        )
+        policy = PPO("MlpPolicy", env, batch_size=32, verbose=1,)
         policy.load(f"{args.expert_policy_file}/model_save/best_model.zip")
     else:
         policy = create_agent(args)

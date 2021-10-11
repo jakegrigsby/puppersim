@@ -28,8 +28,9 @@ def create_pupper_env(render=False, persistence=True):
         env = dc.envs.PersistenceAwareWrapper(env)
     return env
 
+
 class StateStack(gym.Wrapper):
-    def __init__(self, env: gym.Env, num_stack: int, skip : int = 1):
+    def __init__(self, env: gym.Env, num_stack: int, skip: int = 1):
         gym.Wrapper.__init__(self, env)
         self._k = num_stack
         self._frames = deque([], maxlen=num_stack * skip)
@@ -59,14 +60,13 @@ class StateStack(gym.Wrapper):
 
     def _get_obs(self):
         assert len(self._frames) == self._k * self._skip
-        obs = np.concatenate(list(self._frames)[::-self._skip], axis=0)
+        obs = np.concatenate(list(self._frames)[:: -self._skip], axis=0)
         return obs
 
 
 class SqueezeRew(gym.RewardWrapper):
     def __init__(self, env):
         super().__init__(env)
-
 
     def reward(self, r):
         return r[0]
@@ -75,13 +75,10 @@ class SqueezeRew(gym.RewardWrapper):
 def make_sb3_env(rank, log_dir, seed=0):
     def _init():
         env = Monitor(
-            SqueezeRew(gym.wrappers.TimeLimit(create_pupper_env(), 10_000)),
-            log_dir,
+            SqueezeRew(gym.wrappers.TimeLimit(create_pupper_env(), 10_000)), log_dir,
         )
         env.seed(seed + rank)
         return env
 
     set_random_seed(seed)
     return _init
-
-

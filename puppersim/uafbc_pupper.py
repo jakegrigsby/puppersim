@@ -1,4 +1,12 @@
 import argparse
+import os
+import gym
+import puppersim
+import gin
+from pybullet_envs.minitaur.envs_v2 import env_loader
+import puppersim.data as pd
+
+from uafbc.nets import distributions, weight_init
 
 import numpy as np
 import torch
@@ -6,19 +14,44 @@ from torch import nn
 import torch.nn.functional as F
 import gym
 
+import puppersim
 import pybullet
 import pybullet_envs
 
 import uafbc
-from uafbc.wrappers import SimpleGymWrapper, NormActionSpace, ParallelActors
-from wrappers import create_pupper_env, SqueezeRew, StateStack
+from uafbc.wrappers import (
+    SimpleGymWrapper,
+    NormActionSpace,
+    ParallelActors,
+    ScaleReward,
+)
+from wrappers import StateStack
+
+
+def create_pupper_env(render=False):
+    CONFIG_DIR = puppersim.getPupperSimPath() + "/"
+    _CONFIG_FILE = os.path.join(CONFIG_DIR, "pupper_pmtg_slow.gin")
+    gin.bind_parameter("scene_base.SceneBase.data_root", pd.getDataPath() + "/")
+    gin.parse_config_file(_CONFIG_FILE)
+    if render:
+        gin.bind_parameter("SimulationParameters.enable_rendering", True)
+    env = env_loader.load()
+    env = ScaleReward(env, scale=100.0)
+    env = NormActionSpace(env)
+    return env
+
+
+class ScaleAction(gym.ActionWrapper):
+    def action(self, act):
+        return 1.0 * act
+
 
 class Encoder(uafbc.nets.Encoder):
     def __init__(self, in_dim, out_dim):
         super().__init__()
         self._dim = out_dim
-        self.shared_fc1 = nn.Linear(in_dim, 256)
-        self.shared_fc2 = nn.Linear(256, out_dim)
+        self.shared_fc1 = nn.Linear(in_dim, 32)
+        self.shared_fc2 = nn.Linear(32, out_dim)
 
     @property
     def embedding_dim(self):
@@ -30,25 +63,70 @@ class Encoder(uafbc.nets.Encoder):
         return rep
 
 
-def train_cont_gym_online(args):
+class RandomActor(torch.nn.Module):
+    def __init__(
+        self,
+        state_size,
+        action_size,
+        log_std_low=-10.0,
+        log_std_high=2.0,
+        hidden_size=256,
+        dist_impl="pyd",
+    ):
+        super().__init__()
+        assert dist_impl in ["pyd", "beta"]
+        self.fc1 = nn.Linear(state_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.fc3 = nn.Linear(hidden_size, 2 * action_size)
+        self.log_std_low = log_std_low
+        self.log_std_high = log_std_high
+        self.apply(weight_init)
+        self.dist_impl = dist_impl
 
-    def make_env(render=True):
-        env = create_pupper_env(render=render, persistence=False)
+    def forward(self, state):
+        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc2(x))
+        out = self.fc3(x)
+        mu, log_std = out.chunk(2, dim=-1)
+        if self.dist_impl == "pyd":
+            log_std = torch.tanh(log_std)
+            log_std = self.log_std_low + 0.5 * (
+                self.log_std_high - self.log_std_low
+            ) * (log_std + 1)
+            std = log_std.exp()
+
+            # CHANGED
+            mu = torch.randn_like(mu)
+            std = torch.randn_like(std).clamp(1e-3, 0.1)
+
+            dist = distributions.SquashedNormal(mu, std)
+        elif self.dist_impl == "beta":
+            out = 1.0 + F.softplus(out)
+            alpha, beta = out.chunk(2, dim=-1)
+            dist = distributions.BetaDist(alpha, beta)
+        return dist
+
+
+def train_cont_gym_online(args):
+    def make_env(render=False):
+        env = ScaleAction(create_pupper_env(render=render))
         return StateStack(env, num_stack=4, skip=args.skip)
+        return env
 
     train_env = SimpleGymWrapper(ParallelActors(make_env, args.parallel_envs))
-    test_env = SimpleGymWrapper(make_env(render=False))
+    test_env = SimpleGymWrapper(make_env(render=True))
 
     # create agent
     agent = uafbc.Agent(
         act_space_size=train_env.action_space.shape[0],
         encoder=Encoder(train_env.observation_space.shape[0], 128),
         actor_network_cls=uafbc.nets.mlps.ContinuousStochasticActor,
+        # actor_network_cls=RandomActor,
         critic_network_cls=uafbc.nets.mlps.ContinuousCritic,
-        critic_ensemble_size=6,
-        actor_ensemble_size=6,
-        ucb_bonus=25.,
-        hidden_size=128,
+        critic_ensemble_size=2,
+        actor_ensemble_size=1,
+        ucb_bonus=5.0,
+        hidden_size=32,
         discrete=False,
         auto_rescale_targets=True,
         beta_dist=False,
@@ -65,29 +143,29 @@ def train_cont_gym_online(args):
         verbosity=1,
         name=args.name,
         use_pg_update_online=True,
+        # WARNING
         actor_lr=1e-4,
-        actor_clip=1.,
-        critic_clip=1.,
         critic_lr=1e-4,
         encoder_lr=1e-4,
         batch_size=512,
-        critic_updates_per_step=2,
-        gamma=.99,
-        weighted_bellman_temp=20.,
+        critic_updates_per_step=1,
+        gamma=0.995,
+        weighted_bellman_temp=20.0,
         weight_type="softmax",
         use_bc_update_online=False,
         bc_warmup_steps=0,
         num_steps_offline=0,
         num_steps_online=1_000_000,
-        random_warmup_steps=10_000,
+        random_warmup_steps=1_000,
         max_episode_steps=10_000,
         eval_episodes=1,
+        eval_interval=10_000,
         pop=True,
         init_alpha=0.1,
         use_exploration_process=False,
-        target_entropy_mul=1.,
+        target_entropy_mul=0.1,
         alpha_lr=1e-4,
-        render=True,
+        # render=True,
     )
 
 

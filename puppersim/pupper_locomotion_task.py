@@ -112,8 +112,11 @@ class SimpleForwardTask(task_interface.Task):
                 np.abs(acc)
             )
 
-        reward = velocity - (self._straightline_coef * x_dist)
-        reward -= action_acceleration_penalty
+        # new: total distance walked
+        dist_walked = np.linalg.norm(
+            np.array(current_base_position) - np.array(self._last_base_position)
+        )
+        reward = dist_walked
 
         # Energy
         if self._energy_penalty_coef > 0:

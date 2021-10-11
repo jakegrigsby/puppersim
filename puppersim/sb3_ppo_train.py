@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument("--name", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=4096)
     parser.add_argument("--clip_range", type=float, default=0.1)
-    parser.add_argument("--gamma", type=float, default=.99)
+    parser.add_argument("--gamma", type=float, default=0.99)
     return parser.parse_args()
 
 
@@ -39,7 +39,9 @@ if __name__ == "__main__":
 
     num_cpu = 31
     env = SubprocVecEnv([make_sb3_env(i, log_dir) for i in range(num_cpu)])
-    ckpt_callback = CheckpointCallback(save_freq=10_000, save_path=os.path.join(log_dir, "model_save"))
+    ckpt_callback = CheckpointCallback(
+        save_freq=10_000, save_path=os.path.join(log_dir, "model_save")
+    )
     eval_env = SubprocVecEnv([make_sb3_env(num_cpu + 1, log_dir)])
     eval_callback = EvalCallback(
         eval_env,
@@ -51,9 +53,9 @@ if __name__ == "__main__":
         render=False,
         n_eval_episodes=1,
     )
-    policy_kwargs = dict(activation_fn=F.relu,
-                         net_arch=[dict(pi=[1024, 1024], vf=[1024, 1024])],
-                    )
+    policy_kwargs = dict(
+        activation_fn=F.relu, net_arch=[dict(pi=[1024, 1024], vf=[1024, 1024])],
+    )
     model = PPO(
         "MlpPolicy",
         env,
@@ -64,7 +66,7 @@ if __name__ == "__main__":
         verbose=1,
         tensorboard_log=log_dir,
         gamma=args.gamma,
-        ent_coef=.01,
+        ent_coef=0.01,
     )
     model.learn(total_timesteps=1_000_000_000, callback=ckpt_callback)
     model.save(log_dir)
