@@ -50,7 +50,7 @@ pupper_locomotion_task.SimpleForwardTask.terminal_condition = @pupper_terminal_c
 
 # Safety constraints
 pupper_locomotion_task.SimpleForwardTask.energy_penalty_coef = 0
-pupper_locomotion_task.SimpleForwardTask.clip_velocity = .1
+pupper_locomotion_task.SimpleForwardTask.clip_velocity = .001
 pupper_locomotion_task.SimpleForwardTask.straightline_coef = 0
 
 # Specify the motor model parameters. Notice that we don't need to specify the control mode or motor limits here.
@@ -72,6 +72,6 @@ pmtg_wrapper_env.PmtgWrapperEnv.walk_height_coupling_mode = "all coupled"
 pmtg_wrapper_env.PmtgWrapperEnv.variable_swing_stance_ratio = 1
 pmtg_wrapper_env.PmtgWrapperEnv.init_gait = "walk"
 
+#@pmtg_wrapper_env.PmtgWrapperEnv,
 env_loader.load.wrapper_classes = [
-    @pmtg_wrapper_env.PmtgWrapperEnv,
     @observation_dictionary_to_array_wrapper.ObservationDictionaryToArrayWrapper]    

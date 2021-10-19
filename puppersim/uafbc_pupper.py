@@ -43,24 +43,25 @@ def create_pupper_env(render=False):
 
 class ScaleAction(gym.ActionWrapper):
     def action(self, act):
-        return 1.0 * act
+        return 1. * act
 
 
 class Encoder(uafbc.nets.Encoder):
     def __init__(self, in_dim, out_dim):
         super().__init__()
         self._dim = out_dim
-        self.shared_fc1 = nn.Linear(in_dim, 32)
-        self.shared_fc2 = nn.Linear(32, out_dim)
+        #self.shared_fc1 = nn.Linear(in_dim, 256)
+        #self.shared_fc2 = nn.Linear(256, out_dim)
 
     @property
     def embedding_dim(self):
         return self._dim
 
     def forward(self, obs_dict):
-        rep = F.relu(self.shared_fc1(obs_dict["obs"]))
-        rep = F.relu(self.shared_fc2(rep))
-        return rep
+        return obs_dict["obs"]
+        #rep = F.relu(self.shared_fc1(obs_dict["obs"]))
+        #rep = F.relu(self.shared_fc2(rep))
+        #return rep
 
 
 class RandomActor(torch.nn.Module):
@@ -114,21 +115,21 @@ def train_cont_gym_online(args):
         return env
 
     train_env = SimpleGymWrapper(ParallelActors(make_env, args.parallel_envs))
-    test_env = SimpleGymWrapper(make_env(render=True))
+    test_env = SimpleGymWrapper(make_env(render=False))
 
     # create agent
     agent = uafbc.Agent(
         act_space_size=train_env.action_space.shape[0],
-        encoder=Encoder(train_env.observation_space.shape[0], 128),
+        encoder=Encoder(None, train_env.observation_space.shape[0]),
         actor_network_cls=uafbc.nets.mlps.ContinuousStochasticActor,
         # actor_network_cls=RandomActor,
         critic_network_cls=uafbc.nets.mlps.ContinuousCritic,
-        critic_ensemble_size=2,
-        actor_ensemble_size=1,
-        ucb_bonus=5.0,
-        hidden_size=32,
+        ensemble_size=args.ensemble,
+        num_critics=args.critics,
+        ucb_bonus=0.,
+        hidden_size=512,
         discrete=False,
-        auto_rescale_targets=True,
+        auto_rescale_targets=False,
         beta_dist=False,
     )
 
@@ -143,14 +144,13 @@ def train_cont_gym_online(args):
         verbosity=1,
         name=args.name,
         use_pg_update_online=True,
-        # WARNING
         actor_lr=1e-4,
         critic_lr=1e-4,
         encoder_lr=1e-4,
         batch_size=512,
         critic_updates_per_step=1,
-        gamma=0.995,
-        weighted_bellman_temp=20.0,
+        gamma=args.gamma,
+        weighted_bellman_temp=10.0,
         weight_type="softmax",
         use_bc_update_online=False,
         bc_warmup_steps=0,
@@ -160,7 +160,7 @@ def train_cont_gym_online(args):
         max_episode_steps=10_000,
         eval_episodes=1,
         eval_interval=10_000,
-        pop=True,
+        pop=False,
         init_alpha=0.1,
         use_exploration_process=False,
         target_entropy_mul=0.1,
@@ -172,7 +172,10 @@ def train_cont_gym_online(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", type=str, default="uafbc_pupper")
-    parser.add_argument("--parallel_envs", type=int, default=12)
+    parser.add_argument("--parallel_envs", type=int, default=6)
     parser.add_argument("--skip", type=int, default=6)
+    parser.add_argument("--ensemble", type=int, default=1)
+    parser.add_argument("--critics", type=int, default=2)
+    parser.add_argument("--gamma", type=float, default=.99)
     args = parser.parse_args()
     train_cont_gym_online(args)
