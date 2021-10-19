@@ -113,9 +113,11 @@ class SimpleForwardTask(task_interface.Task):
             )
 
         # new: total distance walked
-        dist_walked = np.linalg.norm(
-            np.array(current_base_position) - np.array(self._last_base_position)
-        )
+        #dist_walked = np.linalg.norm(
+        #    np.array(current_base_position) - np.array(self._last_base_position)
+        #)
+        # make pos
+        dist_walked = -(np.array(current_base_position) - np.array(self._last_base_position)).sum()
         reward = dist_walked
 
         # Energy

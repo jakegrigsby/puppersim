@@ -114,8 +114,9 @@ def train_cont_gym_online(args):
         return StateStack(env, num_stack=4, skip=args.skip)
         return env
 
-    train_env = SimpleGymWrapper(ParallelActors(make_env, args.parallel_envs))
-    test_env = SimpleGymWrapper(make_env(render=False))
+    #train_env = SimpleGymWrapper(ParallelActors(make_env, args.parallel_envs))
+    #test_env = SimpleGymWrapper(make_env(True))
+    train_env = test_env = SimpleGymWrapper(make_env(True))
 
     # create agent
     agent = uafbc.Agent(
@@ -127,7 +128,7 @@ def train_cont_gym_online(args):
         ensemble_size=args.ensemble,
         num_critics=args.critics,
         ucb_bonus=0.,
-        hidden_size=512,
+        hidden_size=args.hidden_size,
         discrete=False,
         auto_rescale_targets=False,
         beta_dist=False,
@@ -147,7 +148,7 @@ def train_cont_gym_online(args):
         actor_lr=1e-4,
         critic_lr=1e-4,
         encoder_lr=1e-4,
-        batch_size=512,
+        batch_size=args.batch_size,
         critic_updates_per_step=1,
         gamma=args.gamma,
         weighted_bellman_temp=10.0,
@@ -157,9 +158,9 @@ def train_cont_gym_online(args):
         num_steps_offline=0,
         num_steps_online=1_000_000,
         random_warmup_steps=1_000,
-        max_episode_steps=10_000,
+        max_episode_steps=args.max_steps,
         eval_episodes=1,
-        eval_interval=10_000,
+        eval_interval=args.eval_interval,
         pop=False,
         init_alpha=0.1,
         use_exploration_process=False,
@@ -177,5 +178,9 @@ if __name__ == "__main__":
     parser.add_argument("--ensemble", type=int, default=1)
     parser.add_argument("--critics", type=int, default=2)
     parser.add_argument("--gamma", type=float, default=.99)
+    parser.add_argument("--hidden_size", type=int, default=512)
+    parser.add_argument("--eval_interval", type=int, default=10_000)
+    parser.add_argument("--max_steps", type=int, default=10_000)
+    parser.add_argument("--batch_size", type=int, default=512)
     args = parser.parse_args()
     train_cont_gym_online(args)
