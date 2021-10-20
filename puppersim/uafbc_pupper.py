@@ -2,6 +2,7 @@ import argparse
 import os
 import gym
 import puppersim
+import functools
 import gin
 from pybullet_envs.minitaur.envs_v2 import env_loader
 import puppersim.data as pd
@@ -25,10 +26,11 @@ from uafbc.wrappers import (
     ParallelActors,
     ScaleReward,
 )
+from deep_control.envs import PersistenceAwareWrapper
 from wrappers import StateStack
 
 
-def create_pupper_env(render=False):
+def create_pupper_env(render=False, k=1):
     CONFIG_DIR = puppersim.getPupperSimPath() + "/"
     _CONFIG_FILE = os.path.join(CONFIG_DIR, "pupper_pmtg_slow.gin")
     gin.bind_parameter("scene_base.SceneBase.data_root", pd.getDataPath() + "/")
@@ -37,6 +39,7 @@ def create_pupper_env(render=False):
         gin.bind_parameter("SimulationParameters.enable_rendering", True)
     env = env_loader.load()
     env = ScaleReward(env, scale=100.0)
+    env = PersistenceAwareWrapper(env, k=k, return_history=False)
     env = NormActionSpace(env)
     return env
 
@@ -109,14 +112,14 @@ class RandomActor(torch.nn.Module):
 
 
 def train_cont_gym_online(args):
-    def make_env(render=False):
-        env = ScaleAction(create_pupper_env(render=render))
+    def make_env(render=False, k=1):
+        env = ScaleAction(create_pupper_env(render=render, k=k))
         return StateStack(env, num_stack=4, skip=args.skip)
         return env
 
-    #train_env = SimpleGymWrapper(ParallelActors(make_env, args.parallel_envs))
-    #test_env = SimpleGymWrapper(make_env(True))
-    train_env = test_env = SimpleGymWrapper(make_env(True))
+    make_full_env = functools.partial(make_env, render=False, k=args.k)
+    train_env = SimpleGymWrapper(ParallelActors(make_full_env, args.parallel_envs))
+    test_env = SimpleGymWrapper(make_full_env())
 
     # create agent
     agent = uafbc.Agent(
@@ -127,11 +130,11 @@ def train_cont_gym_online(args):
         critic_network_cls=uafbc.nets.mlps.ContinuousCritic,
         ensemble_size=args.ensemble,
         num_critics=args.critics,
-        ucb_bonus=0.,
+        ucb_bonus=args.ucb_bonus,
         hidden_size=args.hidden_size,
         discrete=False,
         auto_rescale_targets=False,
-        beta_dist=False,
+        beta_dist=args.beta_dist,
     )
 
     buffer = uafbc.replay.PrioritizedReplayBuffer(size=1_000_000)
@@ -147,16 +150,17 @@ def train_cont_gym_online(args):
         use_pg_update_online=True,
         actor_lr=1e-4,
         critic_lr=1e-4,
-        encoder_lr=1e-4,
+        actor_clip=10.,
+        critic_clip=10.,
         batch_size=args.batch_size,
         critic_updates_per_step=1,
         gamma=args.gamma,
         weighted_bellman_temp=10.0,
-        weight_type="softmax",
+        weight_type="sunrise",
         use_bc_update_online=False,
         bc_warmup_steps=0,
         num_steps_offline=0,
-        num_steps_online=1_000_000,
+        num_steps_online=args.steps,
         random_warmup_steps=1_000,
         max_episode_steps=args.max_steps,
         eval_episodes=1,
@@ -164,7 +168,7 @@ def train_cont_gym_online(args):
         pop=False,
         init_alpha=0.1,
         use_exploration_process=False,
-        target_entropy_mul=0.1,
+        target_entropy_mul=1.0,
         alpha_lr=1e-4,
         # render=True,
     )
@@ -177,10 +181,14 @@ if __name__ == "__main__":
     parser.add_argument("--skip", type=int, default=6)
     parser.add_argument("--ensemble", type=int, default=1)
     parser.add_argument("--critics", type=int, default=2)
-    parser.add_argument("--gamma", type=float, default=.99)
-    parser.add_argument("--hidden_size", type=int, default=512)
+    parser.add_argument("--gamma", type=float, default=.995)
+    parser.add_argument("--hidden_size", type=int, default=1024)
     parser.add_argument("--eval_interval", type=int, default=10_000)
     parser.add_argument("--max_steps", type=int, default=10_000)
-    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--batch_size", type=int, default=1024)
+    parser.add_argument("--steps", type=int, default=10_000_000)
+    parser.add_argument("--ucb_bonus", type=float, default=0.0)
+    parser.add_argument("--k", type=int, default=1)
+    parser.add_argument("--beta_dist", action="store_true")
     args = parser.parse_args()
     train_cont_gym_online(args)

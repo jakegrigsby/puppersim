@@ -24,9 +24,7 @@ def create_parser():
         dc.sunrise.add_args(parser)
     elif alg == "aac":
         dc.aac.add_args(parser)
-    parser.add_argument("--k", type=int, default=1)
-    parser.add_argument("--hidden_size", type=int, default=128)
-    parser.add_argument("--r_scale", type=float, default=10.0)
+    parser.add_argument("--hidden_size", type=int, default=256)
     return parser.parse_args()
 
 
@@ -146,7 +144,7 @@ def train(args):
     elif args.alg == "aac":
         torch.multiprocessing.set_start_method("spawn")
         torch.multiprocessing.set_sharing_strategy("file_system")
-        args.steps_per_epoch = 10_000
+        args.steps_per_epoch = 5_000
         args.epochs = 300
         agent = dc.aac.aac(create_pupper_env, **vars(args))
     else:
