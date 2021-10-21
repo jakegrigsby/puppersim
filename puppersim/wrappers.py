@@ -29,41 +29,6 @@ def create_pupper_env(render=False, persistence=True):
     return env
 
 
-class StateStack(gym.Wrapper):
-    def __init__(self, env: gym.Env, num_stack: int, skip: int = 1):
-        gym.Wrapper.__init__(self, env)
-        self._k = num_stack
-        self._frames = deque([], maxlen=num_stack * skip)
-        shp = env.observation_space.shape[0]
-        low = np.array([env.observation_space.low for _ in range(num_stack)]).flatten()
-        high = np.array(
-            [env.observation_space.high for _ in range(num_stack)]
-        ).flatten()
-        self.observation_space = gym.spaces.Box(
-            low=low,
-            high=high,
-            shape=(shp * num_stack,),
-            dtype=env.observation_space.dtype,
-        )
-        self._skip = skip
-
-    def reset(self):
-        obs = self.env.reset()
-        for _ in range(self._k * self._skip):
-            self._frames.append(obs)
-        return self._get_obs()
-
-    def step(self, action):
-        obs, reward, done, info = self.env.step(action)
-        self._frames.append(obs)
-        return self._get_obs(), reward, done, info
-
-    def _get_obs(self):
-        assert len(self._frames) == self._k * self._skip
-        obs = np.concatenate(list(self._frames)[:: -self._skip], axis=0)
-        return obs
-
-
 class SqueezeRew(gym.RewardWrapper):
     def __init__(self, env):
         super().__init__(env)
