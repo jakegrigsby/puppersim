@@ -34,6 +34,34 @@ from super_sac.wrappers import (
 )
 
 
+
+class AddPosition(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        low = np.concatenate((env.observation_space.low, np.array([-np.inf, np.inf, -np.inf])))
+        high = np.concatenate((env.observation_space.high, np.array([np.inf, np.inf, np.inf])))
+        shape = (env.observation_space.shape[0] + 3,)
+        self.observation_space = gym.spaces.Box(
+            low=low,
+            high=high,
+            shape=shape,
+            dtype=env.observation_space.dtype,
+        )
+
+    def reset(self):
+        state = self.env.reset()
+        return self.observation(state)
+
+    def step(self, action):
+        state, rew, done, info = self.env.step(action)
+        state = self.observation(state)
+        return state, rew, done, info
+
+    def observation(self, obs):
+        position = np.array(self.env._last_base_position, dtype=np.float32) / 10.
+        return np.concatenate((obs, position))
+
+
 class PupperFromVision(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
@@ -75,11 +103,12 @@ def create_pupper_env(render=False, from_pixels=True, skip=0, stack=1):
 
     if from_pixels:
         env = PupperFromVision(env)
+        env = FrameSkip(env, skip=skip)
         env = FrameStack(env, num_stack=stack)
     else:
-        env = StateStack(env, num_stack=stack)
+        env = AddPosition(env)
+        env = StateStack(env, num_stack=stack, skip=skip)
         env = NoRender(env)
-    env = FrameSkip(env, skip=skip)
 
     env = ScaleReward(env, scale=100.0)
     env = NormActionSpace(env)
@@ -127,13 +156,7 @@ def train_pupper(
 ):
     train_env = create_pupper_env()
     test_env = create_pupper_env()
-    """
     state = train_env.reset()["obs"]
-    import tqdm
-    for _ in tqdm.tqdm(range(1000)):
-        *_, done, _ = train_env.step(train_env.action_space.sample())
-        if done: train_env.reset()
-    """
 
     if from_pixels:
         encoder = VisionEncoder(test_env.reset()["obs"].shape, 50)
@@ -146,11 +169,9 @@ def train_pupper(
     agent = super_sac.Agent(
         act_space_size=train_env.action_space.shape[0],
         encoder=encoder,
-        actor_network_cls=super_sac.nets.mlps.ContinuousStochasticActor,
-        critic_network_cls=super_sac.nets.mlps.ContinuousCritic,
     )
 
-    buffer = super_sac.replay.PrioritizedReplayBuffer(size=1_000_000)
+    buffer = super_sac.replay.ReplayBuffer(size=1_000_000)
 
     # run training
     super_sac.super_sac(

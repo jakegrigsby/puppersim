@@ -1,100 +1,89 @@
 import argparse
+import tqdm
 import random
 import pickle
 
 import numpy as np
 import gym
 import torch
+import gin
 
-import deep_control as dc
-from stable_baselines3 import PPO
-from wrappers import create_pupper_env
-from train_rl import create_agent
+import super_sac
+from super_sac_pupper import create_pupper_env, CCEncoder
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("alg")
     parser.add_argument("--expert_policy_file", type=str, required=True)
-    parser.add_argument("--track_motors", type=str, default=None)
-    parser.add_argument("--max_steps", type=int, default=10_000)
-    parser.add_argument("--k", type=int, default=1)
-    parser.add_argument("--hidden_size", type=int, default=64)
+    parser.add_argument("--max_steps", type=int, default=5_000)
+    parser.add_argument("--save_experience", type=str, default=None)
     parser.add_argument("--render", action="store_true")
-    parser.add_argument("--log_std_low", type=float, default=-10.0)
-    parser.add_argument("--log_std_high", type=float, default=2.0)
-    parser.add_argument(
-        "--num_rollouts", type=int, default=20, help="Number of expert rollouts"
-    )
+    parser.add_argument("--config", type=str, default=None, required=True)
+    parser.add_argument("--num_rollouts", type=int, default=10)
     args = parser.parse_args()
-    env = create_pupper_env(render=args.render)
-    env.set_k(args.k)
+    gin.parse_config_file(args.config)
 
-    ob_dim = env.observation_space.shape[0]
-    ac_dim = env.action_space.shape[0]
-
-    if args.alg == "aac":
-        policy = dc.nets.StochasticActor(
-            ob_dim,
-            ac_dim,
-            args.log_std_low,
-            args.log_std_high,
-            hidden_size=args.hidden_size,
-        )
-        policy.load_state_dict(torch.load(args.expert_policy_file))
-        policy.to(dc.device)
-    elif args.alg == "sb3":
-        policy = PPO("MlpPolicy", env, batch_size=32, verbose=1,)
-        policy.load(f"{args.expert_policy_file}/model_save/best_model.zip")
-    else:
-        policy = create_agent(args)
-        policy.load(args.expert_policy_file)
-        policy.to(dc.device)
+    env = create_pupper_env()
+    encoder = CCEncoder(None, env.observation_space.shape[0])
+    agent = super_sac.Agent(
+        act_space_size=env.action_space.shape[0],
+        encoder=encoder,
+    )
+    agent.load(args.expert_policy_file)
+    agent.to(super_sac.device)
+    agent.eval()
 
     returns = []
-    observations = []
-    actions = []
-    motor_angle_histories = []
+    reward_histories = []
+    actions, rewards, dones = [], [], []
+    state_keys = env.reset().keys()
+    states = {k:[] for k in state_keys}
+    next_states = {k:[] for k in state_keys}
     ep_lengths = []
-    for i in range(args.num_rollouts):
-        motor_angles = []
+    for i in tqdm.tqdm(range(args.num_rollouts)):
         obs = env.reset()
         done = False
         totalr = 0.0
         steps = 0
         while not done and steps < args.max_steps:
             with torch.no_grad():
-                if args.alg == "aac":
-                    action = (
-                        policy(torch.from_numpy(obs).unsqueeze(0).float().to(dc.device))
-                        .mean.squeeze()
-                        .cpu()
-                        .numpy()
-                    )
-                elif args.alg == "sb3":
-                    action, _ = policy.predict(obs)
-                else:
-                    action = policy.forward(obs, from_cpu=True)
-            observations.append(obs)
+                    action = agent.forward(obs)
+            next_obs, rew, done, _ = env.step(action)
+
+            for key, val in obs.items():
+                states[key].append(val)
+            for key, val in next_obs.items():
+                next_states[key].append(val)
             actions.append(action)
-            obs, r, done, _ = env.step(action)
-            motor_angles.append(obs[:-2])
-            totalr += r
+            rewards.append(rew)
+            dones.append(done)
+
+            obs = next_obs
+            if args.render:
+                env.render()
+            totalr += rew
             steps += 1
+
         ep_lengths.append(steps)
         returns.append(totalr)
-        motor_angle_histories.append(motor_angles)
-
-    if args.track_motors:
-        with open(args.track_motors, "wb") as f:
-            motor_angle_histories = np.array(motor_angle_histories)
-            returns = np.array(returns)
-            pickle.dump({"returns": returns, "motor_angles": motor_angle_histories}, f)
 
     print("returns", returns)
     print("ep_lengths", ep_lengths)
     print("mean return", np.mean(returns))
     print("std of return", np.std(returns))
+
+    if args.save_experience is not None:
+        with open(args.save_experience, "wb") as f:
+            pickle.dump(
+                dict(
+                    states=states,
+                    actions=actions,
+                    rewards=rewards,
+                    next_states=next_states,
+                    dones=dones,
+                ),
+                f,
+            )
 
 
 if __name__ == "__main__":
