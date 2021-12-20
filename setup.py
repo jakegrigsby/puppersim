@@ -37,10 +37,12 @@ setup(
     package_data={'data': ["upper_leg_left_rear.obj"]},
     install_requires=[
         "pybullet",
+        "attrs",
         "gym",
         "numpy",
         "absl-py",
         "gin-config",
+        "scipy",
     ],
     classifiers=[
         "Development Status :: 4 - Beta",
