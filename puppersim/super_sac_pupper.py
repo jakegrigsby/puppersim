@@ -100,6 +100,10 @@ def create_pupper_env(render=False, from_pixels=True, skip=0, stack=1):
     if render:
         gin.bind_parameter("SimulationParameters.enable_rendering", True)
     env = env_loader.load()
+    breakpoint()
+    state = env.reset()
+    random_act = env.action_space.sample()
+    state, rew, done, info = env.step(random_act)
 
     if from_pixels:
         env = PupperFromVision(env)
@@ -156,7 +160,6 @@ def train_pupper(
 ):
     train_env = create_pupper_env()
     test_env = create_pupper_env()
-    state = train_env.reset()["obs"]
 
     if from_pixels:
         encoder = VisionEncoder(test_env.reset()["obs"].shape, 50)

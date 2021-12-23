@@ -105,7 +105,7 @@ class SimpleForwardTask(task_interface.Task):
       action_acceleration_penalty = (
           float(self._weight_action_accel) * np.mean(np.abs(acc)))
 
-    reward = velocity
+    reward = velocity - np.sqrt((current_base_position[0] - self._last_base_position[0]) ** 2)
     reward -= action_acceleration_penalty
 
     # Energy
@@ -115,6 +115,7 @@ class SimpleForwardTask(task_interface.Task):
           self._env.sim_time_step, self._env.num_action_repeat)
       reward += energy_reward * self._energy_penalty_coef
 
+    if self.done(env): reward -= 20
     return reward * self._weight
 
   def done(self, env):
