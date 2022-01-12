@@ -34,12 +34,15 @@ from super_sac.wrappers import (
 )
 
 
-
 class AddPosition(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
-        low = np.concatenate((env.observation_space.low, np.array([-np.inf, np.inf, -np.inf])))
-        high = np.concatenate((env.observation_space.high, np.array([np.inf, np.inf, np.inf])))
+        low = np.concatenate(
+            (env.observation_space.low, np.array([-np.inf, np.inf, -np.inf]))
+        )
+        high = np.concatenate(
+            (env.observation_space.high, np.array([np.inf, np.inf, np.inf]))
+        )
         shape = (env.observation_space.shape[0] + 3,)
         self.observation_space = gym.spaces.Box(
             low=low,
@@ -58,7 +61,7 @@ class AddPosition(gym.Wrapper):
         return state, rew, done, info
 
     def observation(self, obs):
-        position = np.array(self.env._last_base_position, dtype=np.float32) / 10.
+        position = np.array(self.env._last_base_position, dtype=np.float32) / 10.0
         return np.concatenate((obs, position))
 
 
@@ -90,6 +93,7 @@ class NoRender(gym.Wrapper):
     def render(self, *args, **kwargs):
         pass
 
+
 @gin.configurable
 def create_pupper_env(render=False, from_pixels=True, skip=0, stack=1):
     # build env from pybullet config
@@ -100,10 +104,12 @@ def create_pupper_env(render=False, from_pixels=True, skip=0, stack=1):
     if render:
         gin.bind_parameter("SimulationParameters.enable_rendering", True)
     env = env_loader.load()
-    breakpoint()
+
+    """
     state = env.reset()
     random_act = env.action_space.sample()
     state, rew, done, info = env.step(random_act)
+    """
 
     if from_pixels:
         env = PupperFromVision(env)
@@ -137,6 +143,33 @@ class CCEncoder(super_sac.nets.Encoder):
         return obs_dict["obs"]
 
 
+@gin.configurable
+class LSTMEncoder(super_sac.nets.Encoder):
+    def __init__(self, in_dim, out_dim, seq_length=20, hidden_size=128):
+        super().__init__()
+        self.lstm = nn.LSTM(
+            input_size=in_dim // seq_length,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True,
+            dropout=0.0,
+        )
+        self.fc = nn.Linear(hidden_size, out_dim)
+        self.seq_length = seq_length
+        self._dim = out_dim
+
+    @property
+    def embedding_dim(self):
+        return self._dim
+
+    def forward(self, obs):
+        seq = obs["obs"]
+        seq = torch.cat(seq.unsqueeze(1).chunk(self.seq_length, dim=-1)[::-1], dim=1)
+        out, _ = self.lstm(seq)
+        emb = self.fc(out[:, -1, :])
+        return emb
+
+
 class VisionEncoder(super_sac.nets.Encoder):
     def __init__(self, inp_shape, emb_dim=50):
         super().__init__()
@@ -163,7 +196,10 @@ def train_pupper(
 
     if from_pixels:
         encoder = VisionEncoder(test_env.reset()["obs"].shape, 50)
-        augmenter=AugmentationSequence([Drqv2Aug(batch_size)])
+        augmenter = AugmentationSequence([Drqv2Aug(batch_size)])
+    elif "lstm" in args.config:
+        encoder = LSTMEncoder(train_env.observation_space.shape[0], 50)
+        augmenter = None
     else:
         encoder = CCEncoder(None, train_env.observation_space.shape[0])
         augmenter = None
@@ -183,17 +219,22 @@ def train_pupper(
         test_env=test_env,
         buffer=buffer,
         name=name,
-        logging_method="wandb",
+        logging_method=args.logging,
         augmenter=augmenter,
     )
+
 
 def main(args):
     gin.parse_config_file(args.config)
     train_pupper(name=args.name)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", type=str, required=True)
     parser.add_argument("--config", type=str, required=True)
+    parser.add_argument(
+        "--logging", type=str, default="wandb", choices=["wandb", "tensorboard"]
+    )
     args = parser.parse_args()
     main(args)
